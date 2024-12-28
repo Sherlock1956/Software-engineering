@@ -22,6 +22,7 @@ protected:
     BOOL HandleSymbolicLink(const CString& sourcePath, const CString& destDir);
     BOOL HandleFile(const CString& sourcePath, const CString& saveDir);
     BOOL HandleDirectory(const CString& sourcePath, CString& saveDir);
+    bool IsAllowedFileFormat(const CString& fileExt);
 
     // 控件变量
     CEdit m_sourceDirEdit;

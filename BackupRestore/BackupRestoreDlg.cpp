@@ -7,6 +7,8 @@
 #include <afxdlgs.h>  // 用于 CFileDialog
 #include <Shlwapi.h>  // 用于 PathFindFileName
 #include <aclapi.h> // 用于权限和属主管理
+#include <vector>  // 引入 vector 头文件
+#include <algorithm>  // 引入 std::find
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -60,10 +62,18 @@ void CBackupRestoreDlg::OnBnClickedSelectSource()
     CString currentText;
     CString selectedPath;
     m_sourceDirEdit.GetWindowText(currentText);
-    CFileDialog fileDlg(TRUE, nullptr, nullptr, OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_ALLOWMULTISELECT,
-        _T("所有文件 (*.*)|*.*||"));
+
+    // 定义文件类型过滤器，允许用户指定特定文件格式
+    CString fileFilter = _T("所有文件 (*.*)|*.*|文本文件 (*.txt)|*.txt|图像文件 (*.jpg;*.png)|*.jpg;*.png|");
+    fileFilter += _T("文档文件 (*.doc;*.docx)|*.doc;*.docx||");
+
+    CFileDialog fileDlg(TRUE, nullptr, nullptr, OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_ALLOWMULTISELECT, fileFilter);
 
     fileDlg.m_ofn.lpstrTitle = _T("选择源文件");
+    fileDlg.m_ofn.nMaxFile = 10000; // 允许选择多个文件，缓冲区大小
+    CString fileBuffer;
+    fileBuffer.GetBuffer(10000);
+    fileDlg.m_ofn.lpstrFile = fileBuffer.GetBuffer();
 
     if (fileDlg.DoModal() == IDOK)
     {
@@ -75,12 +85,27 @@ void CBackupRestoreDlg::OnBnClickedSelectSource()
                 currentText += _T("\r\n");
             }
             selectedPath = fileDlg.GetNextPathName(pos);  // 获取选择的路径
+
+            // 检查用户选择的文件是否符合要求的格式
+            CString fileExt = selectedPath.Mid(selectedPath.ReverseFind(_T('.')) + 1).MakeLower(); // 获取扩展名
             currentText += selectedPath;
+
         }
         currentText += _T("\r\n");
         m_sourceDirEdit.SetWindowText(currentText);  // 更新源目录输入框
     }
 }
+
+// 检查文件是否为允许的格式
+bool CBackupRestoreDlg::IsAllowedFileFormat(const CString& fileExt)
+{
+    // 允许的文件格式（根据需求调整）
+    const std::vector<CString> allowedFormats = { _T("txt"), _T("jpg"), _T("png"), _T("doc"), _T("docx") };
+
+    // 检查文件格式是否在允许的列表中
+    return std::find(allowedFormats.begin(), allowedFormats.end(), fileExt) != allowedFormats.end();
+}
+
 void CBackupRestoreDlg::OnBnClickedSelectSourceDir()
 {
     // 选择文件夹
