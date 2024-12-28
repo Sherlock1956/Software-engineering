@@ -6,6 +6,7 @@
 #include "afxdialogex.h"
 #include <afxdlgs.h>  // 用于 CFileDialog
 #include <Shlwapi.h>  // 用于 PathFindFileName
+#include <aclapi.h> // 用于权限和属主管理
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -51,15 +52,6 @@ BOOL CBackupRestoreDlg::OnInitDialog()
     SetIcon(m_hIcon, FALSE);   // 设置小图标
 
     return TRUE;  // 除非设置了焦点，否则返回 TRUE
-}
-// 备份函数
-BOOL CBackupRestoreDlg::CopyFileCustom(const CString& sourceFile, const CString& destFile)
-{
-    if (!CopyFile(sourceFile, destFile, FALSE))
-    {
-        return false;
-    }
-    return true;
 }
 
 // 选择源目录
@@ -183,42 +175,110 @@ BOOL CBackupRestoreDlg::HandleSymbolicLink(const CString& sourcePath, const CStr
 }
 
 // 处理普通文件（包括硬链接）
+
+
 BOOL CBackupRestoreDlg::HandleFile(const CString& sourcePath, const CString& saveDir)
 {
     HANDLE hFile = CreateFile(sourcePath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE)
     {
         AfxMessageBox(_T("无法打开文件: ") + sourcePath);
-        return false;
+        return FALSE;
     }
 
     BY_HANDLE_FILE_INFORMATION fileInfo;
-    if (GetFileInformationByHandle(hFile, &fileInfo))
+    if (!GetFileInformationByHandle(hFile, &fileInfo))
     {
-        if (fileInfo.nNumberOfLinks > 1) // 是硬链接
+        AfxMessageBox(_T("无法获取文件信息: ") + sourcePath);
+        CloseHandle(hFile);
+        return FALSE;
+    }
+
+    CString destFile = saveDir + _T("\\") + GetFileNameFromPath(sourcePath);
+    if (fileInfo.nNumberOfLinks > 1) // 处理硬链接
+    {
+        if (!CreateHardLink(destFile, sourcePath, NULL))
         {
-            CString destFile = saveDir + _T("\\") + GetFileNameFromPath(sourcePath);
-            if (!CreateHardLink(destFile, sourcePath, NULL))
-            {
-                AfxMessageBox(_T("无法创建硬链接: ") + sourcePath);
-                CloseHandle(hFile);
-                return false;
-            }
-        }
-        else // 普通文件
-        {
-            CString destFile = saveDir + _T("\\") + GetFileNameFromPath(sourcePath);
-            if (!CopyFile(sourcePath, destFile, FALSE))
-            {
-                AfxMessageBox(_T("无法复制文件: ") + sourcePath);
-                CloseHandle(hFile);
-                return false;
-            }
+            AfxMessageBox(_T("无法创建硬链接: ") + sourcePath);
+            CloseHandle(hFile);
+            return FALSE;
         }
     }
+    else // 处理普通文件
+    {
+        if (!CopyFile(sourcePath, destFile, FALSE))
+        {
+            AfxMessageBox(_T("无法复制文件: ") + sourcePath);
+            CloseHandle(hFile);
+            return FALSE;
+        }
+
+        // 打开目标文件以设置元数据
+        HANDLE hDestFile = CreateFile(destFile, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hDestFile == INVALID_HANDLE_VALUE)
+        {
+            AfxMessageBox(_T("无法打开目标文件以设置元数据: ") + destFile);
+            CloseHandle(hFile);
+            return FALSE;
+        }
+
+        // 设置时间戳
+        FILETIME creationTime, lastAccessTime, lastWriteTime;
+        if (GetFileTime(hFile, &creationTime, &lastAccessTime, &lastWriteTime))
+        {
+            if (!SetFileTime(hDestFile, &creationTime, &lastAccessTime, &lastWriteTime))
+            {
+                AfxMessageBox(_T("无法设置文件时间: ") + destFile);
+                CloseHandle(hFile);
+                CloseHandle(hDestFile);
+                return FALSE;
+            }
+        }
+
+        // 设置文件属性
+        DWORD fileAttributes = GetFileAttributes(sourcePath);
+        if (fileAttributes != INVALID_FILE_ATTRIBUTES)
+        {
+            if (!SetFileAttributes(destFile, fileAttributes))
+            {
+                AfxMessageBox(_T("无法设置文件属性: ") + destFile);
+                CloseHandle(hFile);
+                CloseHandle(hDestFile);
+                return FALSE;
+            }
+        }
+
+        // 获取并设置安全描述符（属主和权限）
+        PSECURITY_DESCRIPTOR pSD = NULL;
+        DWORD sdSize = 0;
+        if (GetFileSecurity(sourcePath, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION, NULL, 0, &sdSize) ||
+            GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+        {
+            pSD = (PSECURITY_DESCRIPTOR)malloc(sdSize);
+            if (pSD && GetFileSecurity(sourcePath, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION, pSD, sdSize, &sdSize))
+            {
+                if (!SetFileSecurity(destFile, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION, pSD))
+                {
+                    DWORD errorCode = GetLastError();
+                    CString errorMsg;
+                    errorMsg.Format(_T("无法设置文件安全描述符: %s\n错误代码: %lu"), destFile, errorCode);
+                    AfxMessageBox(errorMsg);
+                    free(pSD);
+                    CloseHandle(hFile);
+                    CloseHandle(hDestFile);
+                    return FALSE;
+                }
+            }
+            free(pSD);
+        }
+
+        CloseHandle(hDestFile);
+    }
+
     CloseHandle(hFile);
-    return true;
+    return TRUE;
 }
+
 
 // 处理目录
 BOOL CBackupRestoreDlg::HandleDirectory(const CString& sourcePath, CString& saveDir)
@@ -269,7 +329,7 @@ BOOL CBackupRestoreDlg::HandleDirectory(const CString& sourcePath, CString& save
             CString sourceFile = finder.GetFilePath();
             CString destFile = saveDir + _T("\\") + finder.GetFileName();
 
-            if (!CopyFile(sourceFile, destFile, FALSE))
+            if (!HandleFile(sourceFile, saveDir))
             {
                 AfxMessageBox(_T("无法复制文件: ") + sourceFile);
                 return false;
