@@ -15,7 +15,6 @@ protected:
     HICON m_hIcon;
 
     // 备份和恢复函数
-    BOOL CopyFileCustom(const CString& sourceFile, const CString& destFile);
     BOOL BackupFiles(const CString& sourceDir, CString& destDir);
     BOOL RestoreFiles(const CString& backupDir, const CString& restoreDir);
     CString GetFileNameFromPath(const CString& filePath);
@@ -23,12 +22,22 @@ protected:
     BOOL HandleFile(const CString& sourcePath, const CString& saveDir);
     BOOL HandleDirectory(const CString& sourcePath, CString& saveDir);
     bool IsAllowedFileFormat(const CString& fileExt);
+    void OnBnClickedCompressBackup();
+    void OnBnClickedDecompressRestore();
+    CString GetCompressedFileNameFromPath(const CString& filePath);
+    CString GetDeCompressedFileNameFromPath(const CString& filePath);
 
     // 控件变量
     CEdit m_sourceDirEdit;
     CEdit m_destDirEdit;
     CButton m_backupBtn;
     CButton m_restoreBtn;
+    CButton m_compressbackupBtn;
+    CButton m_packbackupBtn;
+    CButton m_encodebackupBtn;
+    CButton m_decompressrestoreBtn;
+    CButton m_unpackrestoreBtn;
+    CButton m_decoderestoreBtn;
     CButton m_selectSourceBtn; // 选择源目录按钮
     CButton m_selectDestBtn;   // 选择目标目录按钮
     CButton m_selectSourceDirBtn;

@@ -2,3 +2,7 @@ tobebackup/
 backup/
 .DS_Store
 Software-Engineering/BackupRestore/.vs/
+*.txt
+*.jpg
+*.png
+*.bak

@@ -9,13 +9,17 @@
 #include <aclapi.h> // 用于权限和属主管理
 #include <vector>  // 引入 vector 头文件
 #include <algorithm>  // 引入 std::find
-
+#include <iostream>
+#include <fstream>
+#include <unordered_map>
+#include <queue>
+#include <bitset>
+#include <string>
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
 
 // CBackupRestoreDlg 对话框
-
 CBackupRestoreDlg::CBackupRestoreDlg(CWnd* pParent /*=nullptr*/)
     : CDialogEx(IDD_BACKUPRESTORE_DIALOG, pParent)
 {
@@ -28,12 +32,17 @@ void CBackupRestoreDlg::DoDataExchange(CDataExchange* pDX)
     DDX_Control(pDX, IDC_EDIT_SOURCE, m_sourceDirEdit);
     DDX_Control(pDX, IDC_EDIT_DEST, m_destDirEdit);
     DDX_Control(pDX, IDC_BUTTON_BACKUP, m_backupBtn);
+    DDX_Control(pDX, IDC_BUTTON_COMPRESS_BACKUP, m_backupBtn);
+    DDX_Control(pDX, IDC_BUTTON_PACK_BACKUP, m_backupBtn);
+    DDX_Control(pDX, IDC_BUTTON_ENCODE_BACKUP, m_backupBtn);
     DDX_Control(pDX, IDC_BUTTON_RESTORE, m_restoreBtn);
+    DDX_Control(pDX, IDC_BUTTON_DECOMPRESS_RESTORE, m_restoreBtn);
+    DDX_Control(pDX, IDC_BUTTON_UNPACK_RESTORE, m_restoreBtn);
+    DDX_Control(pDX, IDC_BUTTON_DECODE_RESTORE, m_restoreBtn);
     DDX_Control(pDX, IDC_BUTTON_SELECT_SOURCE, m_selectSourceBtn); // 源目录按钮
     DDX_Control(pDX, IDC_BUTTON_SELECT_DEST, m_selectDestBtn);     // 目标目录按钮
     DDX_Control(pDX, IDC_BUTTON_SELECT_SOURCE_DIR, m_selectSourceDirBtn);     // 目标目录按钮
 }
-
 
 BEGIN_MESSAGE_MAP(CBackupRestoreDlg, CDialogEx)
     ON_WM_SYSCOMMAND()
@@ -44,8 +53,9 @@ BEGIN_MESSAGE_MAP(CBackupRestoreDlg, CDialogEx)
     ON_BN_CLICKED(IDC_BUTTON_SELECT_SOURCE, &CBackupRestoreDlg::OnBnClickedSelectSource)  // 源目录选择按钮
     ON_BN_CLICKED(IDC_BUTTON_SELECT_DEST, &CBackupRestoreDlg::OnBnClickedSelectDest)      // 目标目录选择按钮
     ON_BN_CLICKED(IDC_BUTTON_SELECT_SOURCE_DIR, &CBackupRestoreDlg::OnBnClickedSelectSourceDir)  // 源目录选择按钮
+    ON_BN_CLICKED(IDC_BUTTON_COMPRESS_BACKUP, &CBackupRestoreDlg::OnBnClickedCompressBackup)
+    ON_BN_CLICKED(IDC_BUTTON_DECOMPRESS_RESTORE, &CBackupRestoreDlg::OnBnClickedDecompressRestore)
 END_MESSAGE_MAP()
-
 
 BOOL CBackupRestoreDlg::OnInitDialog()
 {
@@ -54,6 +64,227 @@ BOOL CBackupRestoreDlg::OnInitDialog()
     SetIcon(m_hIcon, FALSE);   // 设置小图标
 
     return TRUE;  // 除非设置了焦点，否则返回 TRUE
+}
+// Huffman 节点
+struct HuffmanNode {
+    unsigned char data;  // 字节值（0-255）
+    int freq;            // 字节频率
+    HuffmanNode* left;
+    HuffmanNode* right;
+
+    HuffmanNode(unsigned char d, int f) : data(d), freq(f), left(nullptr), right(nullptr) {}
+};
+// 将二进制字符串转换为字节流
+std::vector<unsigned char> PackBitsToBytes(const std::string& binaryString) {
+    std::vector<unsigned char> byteStream;
+    size_t length = binaryString.size();    // 遍历整个字符串，每次处理 8 位
+    for (size_t i = 0; i < length; i += 8) {
+        // 获取当前 8 位的数据，如果不足 8 位，补充 '0' 到右侧
+        std::string byteString = binaryString.substr(i, 8);
+        if (byteString.size() < 8) {
+            // 右侧填充 '0'
+            byteString.append(8 - byteString.size(), '0');
+            std::bitset<8> byte(byteString);
+            // 将 bitset 转换为 unsigned char 并添加到字节流中
+            byteStream.push_back(static_cast<unsigned char>(byte.to_ulong()));
+            return byteStream;
+        }
+        // 将补充后的 byteString 转换为 std::bitset<8>
+        std::bitset<8> byte(byteString);
+        // 将 bitset 转换为 unsigned char 并添加到字节流中
+        byteStream.push_back(static_cast<unsigned char>(byte.to_ulong()));
+    }
+    return byteStream;
+}
+void DeleteHuffmanTree(HuffmanNode* node) {
+    if (!node) return;
+    DeleteHuffmanTree(node->left);
+    DeleteHuffmanTree(node->right);
+    delete node;
+}
+// 比较器用于优先队列
+struct Compare {
+    bool operator()(HuffmanNode* a, HuffmanNode* b) {
+        return (a->freq == b->freq) ? (a->data > b->data) : (a->freq > b->freq);
+    }
+};
+HuffmanNode* BuildHuffmanTree(const std::vector<std::pair<unsigned char, int>> freqVector) {
+    std::priority_queue<HuffmanNode*, std::vector<HuffmanNode*>, Compare> pq;
+
+    // 创建叶节点并加入优先队列
+    for (const auto& entry : freqVector) {
+        pq.push(new HuffmanNode(entry.first, entry.second));
+    }
+
+    // 合并节点构建树
+    while (pq.size() > 1) {
+        HuffmanNode* left = pq.top(); pq.pop();
+        HuffmanNode* right = pq.top(); pq.pop();
+
+        HuffmanNode* parent = new HuffmanNode(0, left->freq + right->freq);
+        parent->left = left;
+        parent->right = right;
+        pq.push(parent);
+    }
+    return pq.top();  // 根节点
+}
+void GenerateHuffmanCodes(HuffmanNode* root, const std::string& code,std::unordered_map<unsigned char, std::string>& huffmanCodes) {
+    if (!root) return;
+
+    // 叶节点：存储编码
+    if (!root->left && !root->right) {
+        huffmanCodes[root->data] = code;
+    }
+
+    GenerateHuffmanCodes(root->left, code + "0", huffmanCodes);
+    GenerateHuffmanCodes(root->right, code + "1", huffmanCodes);
+}
+void CBackupRestoreDlg::OnBnClickedCompressBackup() {
+    CString sourceDir, destDir;
+    CString inputFilePath, outputFilePath;
+    m_sourceDirEdit.GetWindowText(sourceDir);
+    m_destDirEdit.GetWindowText(outputFilePath);
+    
+    int startPos = 0;
+    int delimiterPos = sourceDir.Find(_T("\r\n"), 0);
+    
+    while (delimiterPos != -1)
+    {
+        inputFilePath = sourceDir.Mid(startPos, delimiterPos - startPos);
+        CString destFile = outputFilePath + _T("\\") + GetCompressedFileNameFromPath(inputFilePath);
+        // 统计字符频率
+        std::unordered_map<unsigned char, int> frequencyTable;
+        std::ifstream inputFile(inputFilePath, std::ios::binary);
+        if (!inputFile.is_open()) {
+            AfxMessageBox(_T("Failed to open file: %s", inputFilePath));
+            return;
+        }
+        char ch;
+        while (inputFile.read(reinterpret_cast<char*>(&ch), sizeof(byte))) {
+            frequencyTable[static_cast<unsigned char>(ch)]++;
+        }
+        std::vector<std::pair<unsigned char, int>> freqVector(frequencyTable.begin(), frequencyTable.end());
+        std::sort(freqVector.begin(), freqVector.end(),
+            [](const std::pair<unsigned char, int>& a, const std::pair<unsigned char, int>& b) {
+                return a.first < b.first; // 按照字符值升序排序
+            });
+        inputFile.clear();
+        inputFile.seekg(0, std::ios::beg);
+
+        // 构建 Huffman 树
+        HuffmanNode* root = BuildHuffmanTree(freqVector);
+
+        // 生成编码表
+        std::unordered_map<unsigned char, std::string> huffmanCodes;
+        GenerateHuffmanCodes(root, "", huffmanCodes);
+
+        // 编码文件内容
+        std::string encodedData;
+        while (inputFile.get(ch)) {
+            unsigned char ch_t = static_cast<unsigned char>(ch);
+            std::string data_t = huffmanCodes[ch_t];
+            encodedData += data_t;
+        }
+        inputFile.close();
+        std::vector<unsigned char> packedData = PackBitsToBytes(encodedData);
+        // 将编码和 Huffman 树写入文件
+        std::ofstream outputFile(destFile, std::ios::binary);
+        outputFile << frequencyTable.size() << "\r\n";
+        for (const auto& entry : frequencyTable) {
+            outputFile << static_cast<unsigned int>(static_cast<unsigned char>(entry.first)) << ":" << entry.second << "\r\n";
+        }
+        outputFile << "###\r\n";  // 元数据结束标记
+        // 写入压缩后的数据
+        outputFile.write(reinterpret_cast<const char*>(packedData.data()), packedData.size());
+        outputFile.close();
+        DeleteHuffmanTree(root);
+        startPos = delimiterPos + 2; // 跳过 \r\n
+        delimiterPos = sourceDir.Find(_T("\r\n"), startPos);
+    }
+    AfxMessageBox(_T("压缩备份完成"));
+}
+void CBackupRestoreDlg::OnBnClickedDecompressRestore() {
+    CString compressedFilePath_list, outputFilePath, compressedFilePath;
+    m_sourceDirEdit.GetWindowText(compressedFilePath_list);
+    m_destDirEdit.GetWindowText(outputFilePath);
+
+    int startPos = 0;
+    int delimiterPos = compressedFilePath_list.Find(_T("\r\n"), 0);
+
+    while (delimiterPos != -1)
+    {
+        compressedFilePath = compressedFilePath_list.Mid(startPos, delimiterPos - startPos);
+        CString saveFilePath = outputFilePath + _T("\\") + GetDeCompressedFileNameFromPath(compressedFilePath);
+        std::ifstream inputFile(compressedFilePath,std::ios::binary);
+        if (!inputFile.is_open()) {
+            AfxMessageBox(_T("Failed to open file: %s", compressedFilePath));
+            return;
+        }
+
+        // 读取 Huffman 树元数据
+        std::unordered_map<unsigned char, int> frequencyTable;
+        std::string line;
+        std::getline(inputFile, line);
+        int freqTableSize = std::stoi(line);
+        
+        while (std::getline(inputFile, line)) {
+            if (line == "###\r") 
+                break;  // 遇到结束标记时停止读取
+
+            size_t delimiterPos = line.find(':');
+            if (delimiterPos == std::string::npos) {
+                AfxMessageBox(_T("Invalid frequency table entry:  %s", line));
+                return;
+            }
+
+            // 提取字符的 ASCII 值并转换回字符类型
+            int byteValue = std::stoi(line.substr(0, delimiterPos));
+            int freq = std::stoi(line.substr(delimiterPos + 1));
+
+            // 还原为字符并存储到频率表中
+            frequencyTable[static_cast<unsigned char>(byteValue)] = freq;
+        }
+        // 构建 Huffman 树
+        std::vector<std::pair<unsigned char, int>> freqVector(frequencyTable.begin(), frequencyTable.end());
+        std::sort(freqVector.begin(), freqVector.end(),
+            [](const std::pair<unsigned char, int>& a, const std::pair<unsigned char, int>& b) {
+                return a.first < b.first; // 按照字符值升序排序
+            });
+        HuffmanNode* root = BuildHuffmanTree(freqVector);
+        printf("%d, %d", frequencyTable['p'], frequencyTable['P']);
+
+        // 解码数据
+        HuffmanNode* currentNode = root;
+        std::ofstream outputFile(saveFilePath, std::ios::binary);
+
+        char bitChar;
+        while (inputFile.get(bitChar)) {
+            std::bitset<8> bits(bitChar);
+            for (int i = 7; i >= 0; --i) {
+                if (bits[i] == 0) {
+                    currentNode = currentNode->left;
+                }
+                else {
+                    currentNode = currentNode->right;
+                }
+
+                if (!currentNode->left && !currentNode->right) {
+                    outputFile.put(currentNode->data);
+                    currentNode = root;
+                }
+            }
+        }
+        
+        if (inputFile.eof()) {
+            // 到达文件末尾
+            AfxMessageBox(_T("解压恢复完成"));
+        }
+        inputFile.close();
+        outputFile.close();
+        DeleteHuffmanTree(root);
+        startPos = delimiterPos + 2; // 跳过 \r\n
+        delimiterPos = compressedFilePath_list.Find(_T("\r\n"), startPos);
+    }
 }
 
 // 选择源目录
@@ -200,8 +431,6 @@ BOOL CBackupRestoreDlg::HandleSymbolicLink(const CString& sourcePath, const CStr
 }
 
 // 处理普通文件（包括硬链接）
-
-
 BOOL CBackupRestoreDlg::HandleFile(const CString& sourcePath, const CString& saveDir)
 {
     HANDLE hFile = CreateFile(sourcePath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -287,7 +516,13 @@ BOOL CBackupRestoreDlg::HandleFile(const CString& sourcePath, const CString& sav
                     DWORD errorCode = GetLastError();
                     CString errorMsg;
                     errorMsg.Format(_T("无法设置文件安全描述符: %s\n错误代码: %lu"), destFile, errorCode);
-                    AfxMessageBox(errorMsg);
+                    if (errorCode == 5) {
+                        AfxMessageBox(_T("无法设置文件安全描述符: %s\n,请以管理员身份运行程序",destFile));
+                    }
+                    else {
+                        AfxMessageBox(errorMsg);
+                    }
+                    
                     free(pSD);
                     CloseHandle(hFile);
                     CloseHandle(hDestFile);
@@ -303,7 +538,6 @@ BOOL CBackupRestoreDlg::HandleFile(const CString& sourcePath, const CString& sav
     CloseHandle(hFile);
     return TRUE;
 }
-
 
 // 处理目录
 BOOL CBackupRestoreDlg::HandleDirectory(const CString& sourcePath, CString& saveDir)
@@ -364,7 +598,6 @@ BOOL CBackupRestoreDlg::HandleDirectory(const CString& sourcePath, CString& save
     return true;
 }
 
-
 // 辅助函数：从路径中提取文件名
 CString CBackupRestoreDlg::GetFileNameFromPath(const CString& filePath)
 {
@@ -373,8 +606,24 @@ CString CBackupRestoreDlg::GetFileNameFromPath(const CString& filePath)
         return filePath;  // 如果没有找到 '\\'，返回整个路径（假设路径是文件名）
     return filePath.Mid(pos + 1);  // 返回文件名部分
 }
+CString CBackupRestoreDlg::GetCompressedFileNameFromPath(const CString& filePath)
+{
+    int pos = filePath.ReverseFind(_T('\\'));
+    if (pos == -1)
+        return filePath;  // 如果没有找到 '\\'，返回整个路径（假设路径是文件名）
+    CString tem_name = filePath.Mid(pos + 1);  // 返回文件名部分
+    return tem_name + _T(".huff");
+}
+CString CBackupRestoreDlg::GetDeCompressedFileNameFromPath(const CString& filePath)
+{
+    int pos = filePath.ReverseFind(_T('\\'));
+    if (pos == -1)
+        return filePath;  // 如果没有找到 '\\'，返回整个路径（假设路径是文件名）
+    CString tem_name = filePath.Mid(pos + 1);  // 返回文件名部分
+    pos = tem_name.ReverseFind(_T('.huff'));
+    return tem_name.Left(pos + 1);
 
-
+}
 
 int CBackupRestoreDlg::RestoreFiles(const CString& backupPath_list, const CString& restoreDir)
 {
@@ -422,7 +671,6 @@ int CBackupRestoreDlg::RestoreFiles(const CString& backupPath_list, const CStrin
 
     return 1;
 }
-
 
 void CBackupRestoreDlg::OnBnClickedBackup()
 {
