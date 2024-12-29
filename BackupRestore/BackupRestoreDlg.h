@@ -36,6 +36,7 @@ protected:
     HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
     void OnBnClickedClearSource();
     void OnBnClickedPackFiles();
+    void OnBnClickedUnPackFiles();
 
     // 控件变量
     CEdit m_sourceDirEdit;

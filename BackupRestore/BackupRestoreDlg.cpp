@@ -60,6 +60,7 @@ BEGIN_MESSAGE_MAP(CBackupRestoreDlg, CDialogEx)
     ON_EN_KILLFOCUS(IDC_EDIT_PACK_NAME, &CBackupRestoreDlg::OnEditKillFocus2)
     ON_BN_CLICKED(IDC_BUTTON_CLEAR_SOURCE, &CBackupRestoreDlg::OnBnClickedClearSource)
     ON_BN_CLICKED(IDC_BUTTON_PACK_BACKUP, &CBackupRestoreDlg::OnBnClickedPackFiles)
+    ON_BN_CLICKED(IDC_BUTTON_UNPACK_RESTORE, &CBackupRestoreDlg::OnBnClickedUnPackFiles)
     ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
 
@@ -103,6 +104,7 @@ void CBackupRestoreDlg::OnEditSetFocus()
 {
     m_passwordEdit.SetWindowText(_T(""));
 }
+
 void CBackupRestoreDlg::OnEditSetFocus2()
 {
     m_packnameEdit.SetWindowText(_T(""));
@@ -118,6 +120,7 @@ void CBackupRestoreDlg::OnEditKillFocus()
         m_passwordEdit.SetWindowText(_T("请在此输入加密密码"));
     }
 }
+
 void CBackupRestoreDlg::OnEditKillFocus2()
 {
     CString currentText;
@@ -134,24 +137,13 @@ std::streamsize GetFileSize(const std::string& filePath) {
     return file.tellg();
 }
 
-// 填充块
+// 填充块，tar文件打包最后需要加两个空白文件块
 void WritePaddingBlock(std::ofstream& tarFile) {
     std::vector<char> endBlock(512, '\0');
     tarFile.write(endBlock.data(), 512); // 第一个空块
     tarFile.write(endBlock.data(), 512); // 第二个空块
 }
 
-int setCheckSum(std::vector<char> p) {
-    int n, u = 0;
-    for (n = 0; n < 512; ++n) {
-        if (n < 148 || n > 155)
-            /* Standard tar checksum adds unsigned bytes. */
-            u += static_cast<unsigned char>(p[n]);
-        else
-            u += 0x20;
-    }
-    return u;
-}
 // 填充tar文件头部信息
 void WriteTarHeader(std::ofstream& tarFile, const std::string& fileName, std::streamsize fileSize) {
     // 初始化 512 字节的 Header Block
@@ -192,7 +184,6 @@ void WriteTarHeader(std::ofstream& tarFile, const std::string& fileName, std::st
     for (const char& byte : header) {
         checksum += static_cast<unsigned char>(byte);
     }
-    checksum = setCheckSum(header);
     std::ostringstream chksumStream;
     chksumStream << std::setw(6) << std::setfill('0') << std::oct << checksum;
     std::string chksumStr = chksumStream.str();
@@ -259,15 +250,13 @@ void CreateTarArchive(const std::string& outputTarFile, const std::vector<std::s
         else if (std::filesystem::is_regular_file(path)) {
             AddFileToTar(tarFile, path); // 如果是文件，直接添加
         }
-        else {
-            std::cerr << "不支持的路径类型: " << path << std::endl;
-        }
     }
     WritePaddingBlock(tarFile);
 
     tarFile.close();
-    AfxMessageBox(_T("文件打包完成"));
+    AfxMessageBox(_T("文件打包完成，如需压缩，请使用压缩备份功能"));
 }
+
 void CBackupRestoreDlg::OnBnClickedPackFiles() {
     CString sourceDir, outputDir, packName;
     m_sourceDirEdit.GetWindowText(sourceDir);
@@ -296,8 +285,97 @@ void CBackupRestoreDlg::OnBnClickedPackFiles() {
     CreateTarArchive(std::string(CT2A(outputTarFile)), filePaths);
 }
 
+void ExtractTarHeader(const std::vector<char>& header, std::string& fileName, size_t& fileSize) {
+    // 解析文件名（100字节）
+    fileName.assign(header.data(), 100);
+    fileName = fileName.c_str(); // 去除可能存在的尾部空字符
 
+    // 解析文件大小（12字节，八进制表示）
+    std::string sizeStr(header.data() + 124, 12);
+    fileSize = std::stoul(sizeStr, nullptr, 8);
+}
 
+void CBackupRestoreDlg::OnBnClickedUnPackFiles() {
+    std::string tarFilePath;
+    std::string outputDir;
+    CString sourceFile, targetDir;
+    m_sourceDirEdit.GetWindowText(sourceFile);
+    m_destDirEdit.GetWindowText(targetDir);
+    outputDir = CT2A(targetDir);
+    int startPos = 0;
+    int delimiterPos = sourceFile.Find(_T("\r\n"), 0);
+    while (delimiterPos != -1)
+    {
+        tarFilePath = CT2A(sourceFile.Mid(startPos, delimiterPos - startPos));
+        std::ifstream tarFile(tarFilePath, std::ios::binary);
+        if (!tarFile.is_open()) {
+            CString message;
+            message.Format(_T("无法打开 TAR 文件: %s", tarFilePath));
+            AfxMessageBox(message);
+            return;
+        }
+
+        while (true) {
+            // 读取头部信息（512字节）
+            std::vector<char> header(512, 0);
+            tarFile.read(header.data(), 512);
+
+            // 检查是否是结束块（全零）
+            if (tarFile.gcount() == 0 || std::all_of(header.begin(), header.end(), [](char c) { return c == '\0'; })) {
+                break;
+            }
+
+            // 解析文件头部信息
+            std::string fileName;
+            size_t fileSize = 0;
+            ExtractTarHeader(header, fileName, fileSize);
+
+            if (fileName.empty()) {
+                break; // 无效的文件名，退出
+            }
+
+            // 目标文件路径
+            std::string outputPath = outputDir + "\\" + fileName;
+            std::filesystem::path outputFilePath(outputPath);
+            if (!std::filesystem::exists(outputFilePath.parent_path())) {
+                std::filesystem::create_directories(outputFilePath.parent_path());
+            }
+
+            // 读取文件内容
+            std::ofstream outputFile(outputPath, std::ios::binary);
+            if (!outputFile.is_open()) {
+                CString message;
+                message.Format(_T("无法创建文件: %s", outputPath));
+                AfxMessageBox(message);
+                tarFile.seekg((fileSize + 511) / 512 * 512, std::ios::cur); // 跳过文件内容
+                continue;
+            }
+
+            std::vector<char> buffer(512);
+            size_t remainingSize = fileSize;
+            while (remainingSize > 0) {
+                size_t readSize = min(remainingSize, buffer.size());
+                tarFile.read(buffer.data(), readSize);
+                outputFile.write(buffer.data(), readSize);
+                remainingSize -= readSize;
+            }
+
+            outputFile.close();
+
+            // 跳过填充到512字节的部分
+            size_t paddingSize = 512 - (fileSize % 512);
+            if (paddingSize < 512) {
+                tarFile.seekg(paddingSize, std::ios::cur);
+            }
+        }
+        tarFile.close();
+        startPos = delimiterPos + 2; // 跳过 \r\n
+        delimiterPos = sourceFile.Find(_T("\r\n"), startPos);
+    }
+    CString message;
+    message.Format(_T("解包完成，如需解压，请使用解压恢复功能"));
+    AfxMessageBox(message);
+}
 
 // 从用户密码和盐值派生key和iv
 void DeriveKeyAndIv(const std::string& password, const unsigned char* salt, unsigned char* key, unsigned char* iv) {
@@ -432,7 +510,9 @@ void CBackupRestoreDlg::OnBnClickedEncryptBackup() {
 
         std::ifstream inputFile(inputFilePath, std::ios::binary);
         if (!inputFile.is_open()) {
-            AfxMessageBox(_T("Failed to open file: %s", inputFilePath));
+            CString message;
+            message.Format(_T("无法打开文件: %s", inputFilePath));
+            AfxMessageBox(message);
             return;
         }
 
@@ -444,7 +524,9 @@ void CBackupRestoreDlg::OnBnClickedEncryptBackup() {
 
         std::ofstream outputFile(destFile, std::ios::binary);
         if (!outputFile.is_open()) {
-            AfxMessageBox(_T("Failed to open destination file: %s", destFile));
+            CString message;
+            message.Format(_T("Failed to open destination file: %s", destFile));
+            AfxMessageBox(message);
             return;
         }
 
@@ -490,7 +572,9 @@ void CBackupRestoreDlg::OnBnClickedDecryptRestore() {
         inputFilePath = sourceDir.Mid(startPos, delimiterPos - startPos);
         std::ifstream inputFile(inputFilePath, std::ios::binary);
         if (!inputFile.is_open()) {
-            AfxMessageBox(_T("Failed to open file: %s", inputFilePath));
+            CString message;
+            message.Format(_T("无法打开文件: %s", inputFilePath));
+            AfxMessageBox(message);
             return;
         }
 
@@ -514,7 +598,9 @@ void CBackupRestoreDlg::OnBnClickedDecryptRestore() {
             CString destFile = destDir + _T("\\") + GetDecryptedFileNameFromPath(inputFilePath);
             std::ofstream outputFile(destFile, std::ios::binary);
             if (!outputFile.is_open()) {
-                AfxMessageBox(_T("Failed to open destination file: %s", destFile));
+                CString message;
+                message.Format(_T("无法打开文件: %s", destFile));
+                AfxMessageBox(message);
                 return;
             }
             outputFile.write(reinterpret_cast<const char*>(decryptedData.data()), decryptedData.size());
@@ -635,7 +721,9 @@ void CBackupRestoreDlg::OnBnClickedCompressBackup() {
         std::unordered_map<unsigned char, int> frequencyTable;
         std::ifstream inputFile(inputFilePath, std::ios::binary);
         if (!inputFile.is_open()) {
-            AfxMessageBox(_T("Failed to open file: %s", inputFilePath));
+            CString message;
+            message.Format(_T("无法打开文件: %s", inputFilePath));
+            AfxMessageBox(message);
             return;
         }
         char ch;
@@ -986,13 +1074,8 @@ BOOL CBackupRestoreDlg::HandleFile(const CString& sourcePath, const CString& sav
                 {
                     DWORD errorCode = GetLastError();
                     CString errorMsg;
-                    errorMsg.Format(_T("无法设置文件安全描述符: %s\n错误代码: %lu"), destFile, errorCode);
-                    if (errorCode == 5) {
-                        AfxMessageBox(_T("无法设置文件安全描述符: %s\n,请以管理员身份运行程序",destFile));
-                    }
-                    else {
-                        AfxMessageBox(errorMsg);
-                    }
+                    errorMsg = _T("无法设置文件安全描述符: ") + destFile + _T("\n请以管理员身份运行程序");
+                    AfxMessageBox(errorMsg);
                     
                     free(pSD);
                     CloseHandle(hFile);
