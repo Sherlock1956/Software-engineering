@@ -76,6 +76,8 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
+    <IncludePath>E:\OpenSSL-Win64\include;$(IncludePath)</IncludePath>
+    <LibraryPath>E:\OpenSSL-Win64\lib\VC\x64\MTd;E:\OpenSSL-Win64\lib\VC\x64\MT;E:\OpenSSL-Win64\lib\VC\x64\MDd;E:\OpenSSL-Win64\lib\VC\x64\MD;E:\OpenSSL-Win64\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
@@ -96,6 +98,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>libssl.lib;libcrypto.lib</AdditionalDependencies>
     </Link>
     <Midl>
       <MkTypLibCompatible>false</MkTypLibCompatible>

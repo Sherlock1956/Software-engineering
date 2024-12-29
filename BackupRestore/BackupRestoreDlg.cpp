@@ -15,6 +15,8 @@
 #include <queue>
 #include <bitset>
 #include <string>
+#include <openssl/aes.h>
+#include <openssl/rand.h>
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
@@ -32,16 +34,18 @@ void CBackupRestoreDlg::DoDataExchange(CDataExchange* pDX)
     DDX_Control(pDX, IDC_EDIT_SOURCE, m_sourceDirEdit);
     DDX_Control(pDX, IDC_EDIT_DEST, m_destDirEdit);
     DDX_Control(pDX, IDC_BUTTON_BACKUP, m_backupBtn);
-    DDX_Control(pDX, IDC_BUTTON_COMPRESS_BACKUP, m_backupBtn);
-    DDX_Control(pDX, IDC_BUTTON_PACK_BACKUP, m_backupBtn);
-    DDX_Control(pDX, IDC_BUTTON_ENCODE_BACKUP, m_backupBtn);
+    DDX_Control(pDX, IDC_BUTTON_COMPRESS_BACKUP, m_compressbackupBtn);
+    DDX_Control(pDX, IDC_BUTTON_PACK_BACKUP, m_packbackupBtn);
+    DDX_Control(pDX, IDC_BUTTON_ENCODE_BACKUP, m_encodebackupBtn);
     DDX_Control(pDX, IDC_BUTTON_RESTORE, m_restoreBtn);
-    DDX_Control(pDX, IDC_BUTTON_DECOMPRESS_RESTORE, m_restoreBtn);
-    DDX_Control(pDX, IDC_BUTTON_UNPACK_RESTORE, m_restoreBtn);
-    DDX_Control(pDX, IDC_BUTTON_DECODE_RESTORE, m_restoreBtn);
+    DDX_Control(pDX, IDC_BUTTON_DECOMPRESS_RESTORE, m_decompressrestoreBtn);
+    DDX_Control(pDX, IDC_BUTTON_UNPACK_RESTORE, m_unpackrestoreBtn);
+    DDX_Control(pDX, IDC_BUTTON_DECODE_RESTORE, m_decoderestoreBtn);
     DDX_Control(pDX, IDC_BUTTON_SELECT_SOURCE, m_selectSourceBtn); // 源目录按钮
     DDX_Control(pDX, IDC_BUTTON_SELECT_DEST, m_selectDestBtn);     // 目标目录按钮
     DDX_Control(pDX, IDC_BUTTON_SELECT_SOURCE_DIR, m_selectSourceDirBtn);     // 目标目录按钮
+    DDX_Control(pDX, IDC_EDIT_PASSWORD, m_passwordEdit);
+
 }
 
 BEGIN_MESSAGE_MAP(CBackupRestoreDlg, CDialogEx)
@@ -55,6 +59,11 @@ BEGIN_MESSAGE_MAP(CBackupRestoreDlg, CDialogEx)
     ON_BN_CLICKED(IDC_BUTTON_SELECT_SOURCE_DIR, &CBackupRestoreDlg::OnBnClickedSelectSourceDir)  // 源目录选择按钮
     ON_BN_CLICKED(IDC_BUTTON_COMPRESS_BACKUP, &CBackupRestoreDlg::OnBnClickedCompressBackup)
     ON_BN_CLICKED(IDC_BUTTON_DECOMPRESS_RESTORE, &CBackupRestoreDlg::OnBnClickedDecompressRestore)
+    ON_BN_CLICKED(IDC_BUTTON_ENCODE_BACKUP, &CBackupRestoreDlg::OnBnClickedEncryptBackup)
+    ON_BN_CLICKED(IDC_BUTTON_DECODE_RESTORE, &CBackupRestoreDlg::OnBnClickedDecryptRestore)
+    ON_EN_SETFOCUS(IDC_EDIT_PASSWORD, &CBackupRestoreDlg::OnEditSetFocus)
+    ON_EN_KILLFOCUS(IDC_EDIT_PASSWORD, &CBackupRestoreDlg::OnEditKillFocus)
+    ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
 
 BOOL CBackupRestoreDlg::OnInitDialog()
@@ -62,9 +71,272 @@ BOOL CBackupRestoreDlg::OnInitDialog()
     CDialogEx::OnInitDialog();
     SetIcon(m_hIcon, TRUE);    // 设置大图标
     SetIcon(m_hIcon, FALSE);   // 设置小图标
+    m_passwordEdit.SetWindowText(_T("请在此输入加密密码"));
+    m_passwordEdit.SetSel(0, -1);  // 选择所有文本
+    m_passwordEdit.SetFocus();     // 设置焦点
 
     return TRUE;  // 除非设置了焦点，否则返回 TRUE
 }
+HBRUSH CBackupRestoreDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+    HBRUSH hbr = CDialogEx::OnCtlColor(pDC, pWnd, nCtlColor);
+
+    if (pWnd->GetDlgCtrlID() == IDC_EDIT_PASSWORD)  // 判断是否是指定的编辑框
+    {
+        // 设置灰色字体
+        pDC->SetTextColor(RGB(169, 169, 169));  // 灰色
+        pDC->SetBkMode(TRANSPARENT);            // 背景透明
+    }
+
+    return hbr;
+}
+void CBackupRestoreDlg::OnEditSetFocus()
+{
+    CString currentText;
+    m_passwordEdit.GetWindowText(currentText);
+    m_passwordEdit.SetWindowText(_T(""));
+}
+
+void CBackupRestoreDlg::OnEditKillFocus()
+{
+    CString currentText;
+    m_passwordEdit.GetWindowText(currentText);
+
+    // 如果文本框为空，则恢复提示文本
+    if (currentText.IsEmpty())
+    {
+        m_passwordEdit.SetWindowText(_T("请在此输入加密密码"));
+    }
+}
+void DeriveKeyAndIv(const std::string& password, const unsigned char* salt, unsigned char* key, unsigned char* iv) {
+    EVP_BytesToKey(EVP_aes_128_cbc(), EVP_sha256(), salt,
+        reinterpret_cast<const unsigned char*>(password.c_str()), password.length(), 1, key, iv);
+}
+void AES_Encrypt(const std::vector<unsigned char>& input, std::vector<unsigned char>& output,
+    const unsigned char* key, const unsigned char* iv) {
+    // 创建和初始化上下文
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) {
+        throw std::runtime_error("Failed to create EVP_CIPHER_CTX");
+    }
+
+    // 初始化加密操作，使用 AES-128-CBC 模式
+    if (EVP_EncryptInit_ex(ctx, EVP_aes_128_cbc(), nullptr, key, iv) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        throw std::runtime_error("EVP_EncryptInit_ex failed");
+    }
+
+    // 添加填充
+    EVP_CIPHER_CTX_set_padding(ctx, 1);
+
+    // 分配输出缓冲区，大小要包括可能的填充字节
+    int blockSize = EVP_CIPHER_block_size(EVP_aes_128_cbc());
+    int maxOutputSize = input.size() + blockSize;
+    output.resize(maxOutputSize);
+
+    // 加密数据
+    int outputLen = 0;
+    int totalLen = 0;
+    if (EVP_EncryptUpdate(ctx, output.data(), &outputLen, input.data(), input.size()) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        throw std::runtime_error("EVP_EncryptUpdate failed");
+    }
+    totalLen += outputLen;
+
+    // 处理加密最后一块数据
+    if (EVP_EncryptFinal_ex(ctx, output.data() + totalLen, &outputLen) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        throw std::runtime_error("EVP_EncryptFinal_ex failed");
+    }
+    totalLen += outputLen;
+
+    // 调整输出缓冲区大小
+    output.resize(totalLen);
+
+    // 清理上下文
+    EVP_CIPHER_CTX_free(ctx);
+}
+
+
+void AES_Decrypt(const std::vector<unsigned char>& input, std::vector<unsigned char>& output,
+    const unsigned char* key, const unsigned char* iv) {
+    // 创建和初始化上下文
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) {
+        throw std::runtime_error("Failed to create EVP_CIPHER_CTX");
+    }
+
+    // 初始化解密操作，使用 AES-128-CBC 模式
+    if (EVP_DecryptInit_ex(ctx, EVP_aes_128_cbc(), nullptr, key, iv) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        throw std::runtime_error("EVP_DecryptInit_ex failed");
+    }
+
+    // 分配输出缓冲区，大小为输入大小的最大可能长度
+    output.resize(input.size());
+
+    int outputLen = 0;
+    int totalLen = 0;
+
+    // 解密数据
+    if (EVP_DecryptUpdate(ctx, output.data(), &outputLen, input.data(), input.size()) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        throw std::runtime_error("EVP_DecryptUpdate failed");
+    }
+    totalLen += outputLen;
+
+    // 处理解密最后一块数据（包括去除填充）
+    if (EVP_DecryptFinal_ex(ctx, output.data() + totalLen, &outputLen) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        throw std::runtime_error("EVP_DecryptFinal_ex failed");
+    }
+    totalLen += outputLen;
+
+    // 调整输出缓冲区大小，去掉填充部分
+    output.resize(totalLen);
+
+    // 清理上下文
+    EVP_CIPHER_CTX_free(ctx);
+}
+void CBackupRestoreDlg::OnBnClickedEncryptBackup() {
+    CString sourceDir, destDir;
+    CString inputFilePath, outputFilePath;
+    m_sourceDirEdit.GetWindowText(sourceDir);
+    m_destDirEdit.GetWindowText(destDir);
+    if (sourceDir.IsEmpty() || destDir.IsEmpty())
+    {
+        AfxMessageBox(_T("源目录和目标目录不能为空"));
+        return;
+    }
+
+    // 提示用户输入密码
+
+    CString password_t;
+    m_passwordEdit.GetWindowText(password_t);
+    if (password_t == _T("") || password_t == _T("请在此输入加密密码")) {
+        AfxMessageBox(_T("请输入加密密码"));
+        return;
+    }
+    std::string password = CT2A(password_t);
+
+    // 生成盐值（salt），它将和密码一起用于派生密钥和 IV
+    unsigned char salt[8];
+    if (!RAND_bytes(salt, sizeof(salt))) {
+        AfxMessageBox(_T("Failed to generate salt"));
+        return;
+    }
+
+    unsigned char aesKey[16];  // 128-bit key
+    unsigned char aesIv[AES_BLOCK_SIZE];  // 128-bit IV
+    DeriveKeyAndIv(password, salt, aesKey, aesIv);
+
+    int startPos = 0;
+    int delimiterPos = sourceDir.Find(_T("\r\n"), 0);
+
+    while (delimiterPos != -1) {
+        inputFilePath = sourceDir.Mid(startPos, delimiterPos - startPos);
+        CString destFile = destDir + _T("\\") + GetEncryptedFileNameFromPath(inputFilePath);
+
+        std::ifstream inputFile(inputFilePath, std::ios::binary);
+        if (!inputFile.is_open()) {
+            AfxMessageBox(_T("Failed to open file: %s", inputFilePath));
+            return;
+        }
+
+        std::vector<unsigned char> fileData((std::istreambuf_iterator<char>(inputFile)), std::istreambuf_iterator<char>());
+        inputFile.close();
+
+        std::vector<unsigned char> encryptedData;
+        AES_Encrypt(fileData, encryptedData, aesKey, aesIv);
+
+        std::ofstream outputFile(destFile, std::ios::binary);
+        if (!outputFile.is_open()) {
+            AfxMessageBox(_T("Failed to open destination file: %s", destFile));
+            return;
+        }
+
+        // 写入盐值
+        outputFile.write(reinterpret_cast<const char*>(salt), sizeof(salt));
+
+        // 写入加密后的数据
+        outputFile.write(reinterpret_cast<const char*>(encryptedData.data()), encryptedData.size());
+        outputFile.close();
+
+        startPos = delimiterPos + 2;  // 跳过 \r\n
+        delimiterPos = sourceDir.Find(_T("\r\n"), startPos);
+    }
+    AfxMessageBox(_T("加密备份完成"));
+}
+void CBackupRestoreDlg::OnBnClickedDecryptRestore() {
+    CString sourceDir, destDir;
+    CString inputFilePath, outputFilePath;
+    m_sourceDirEdit.GetWindowText(sourceDir);
+    m_destDirEdit.GetWindowText(destDir);
+    if (sourceDir.IsEmpty() || destDir.IsEmpty())
+    {
+        AfxMessageBox(_T("源目录和目标目录不能为空"));
+        return;
+    }
+    // 提示用户输入密码
+    CString password_t;
+    m_passwordEdit.GetWindowText(password_t);
+    if (password_t == _T("") || password_t == _T("请在此输入加密密码")) {
+        AfxMessageBox(_T("请输入加密密码"));
+        return;
+    }
+    std::string password = CT2A(password_t);
+    unsigned char aesKey[16];  // 128-bit key
+    unsigned char aesIv[AES_BLOCK_SIZE];  // 128-bit IV
+    bool passwordCorrect = false;
+
+    int startPos = 0;
+    int delimiterPos = sourceDir.Find(_T("\r\n"), 0);
+
+    while (delimiterPos != -1) {
+        inputFilePath = sourceDir.Mid(startPos, delimiterPos - startPos);
+        std::ifstream inputFile(inputFilePath, std::ios::binary);
+        if (!inputFile.is_open()) {
+            AfxMessageBox(_T("Failed to open file: %s", inputFilePath));
+            return;
+        }
+
+        // 读取盐值
+        unsigned char salt[8];
+        inputFile.read(reinterpret_cast<char*>(salt), sizeof(salt));
+
+        std::vector<unsigned char> encryptedData((std::istreambuf_iterator<char>(inputFile)), std::istreambuf_iterator<char>());
+        inputFile.close();
+
+        // 使用密码和盐值生成密钥和 IV
+        DeriveKeyAndIv(password, salt, aesKey, aesIv);
+
+        // 解密数据
+        std::vector<unsigned char> decryptedData;
+        try {
+            // 解密数据
+            std::vector<unsigned char> decryptedData;
+            AES_Decrypt(encryptedData, decryptedData, aesKey, aesIv);
+            // 输出解密后的数据到目标文件
+            CString destFile = destDir + _T("\\") + GetDecryptedFileNameFromPath(inputFilePath);
+            std::ofstream outputFile(destFile, std::ios::binary);
+            if (!outputFile.is_open()) {
+                AfxMessageBox(_T("Failed to open destination file: %s", destFile));
+                return;
+            }
+            outputFile.write(reinterpret_cast<const char*>(decryptedData.data()), decryptedData.size());
+            outputFile.close();
+        }
+        catch (const std::exception& e) {
+            AfxMessageBox(_T("密码不正确，无法解密文件。"));
+            return;
+        }
+        startPos = delimiterPos + 2;  // 跳过 \r\n
+        delimiterPos = sourceDir.Find(_T("\r\n"), startPos);
+    }
+
+    AfxMessageBox(_T("解密恢复完成"));
+}
+
 // Huffman 节点
 struct HuffmanNode {
     unsigned char data;  // 字节值（0-255）
@@ -144,6 +416,11 @@ void CBackupRestoreDlg::OnBnClickedCompressBackup() {
     CString inputFilePath, outputFilePath;
     m_sourceDirEdit.GetWindowText(sourceDir);
     m_destDirEdit.GetWindowText(outputFilePath);
+    if (sourceDir.IsEmpty() || destDir.IsEmpty())
+    {
+        AfxMessageBox(_T("源目录和目标目录不能为空"));
+        return;
+    }
     
     int startPos = 0;
     int delimiterPos = sourceDir.Find(_T("\r\n"), 0);
@@ -207,6 +484,11 @@ void CBackupRestoreDlg::OnBnClickedDecompressRestore() {
     CString compressedFilePath_list, outputFilePath, compressedFilePath;
     m_sourceDirEdit.GetWindowText(compressedFilePath_list);
     m_destDirEdit.GetWindowText(outputFilePath);
+    if (compressedFilePath_list.IsEmpty() || outputFilePath.IsEmpty())
+    {
+        AfxMessageBox(_T("源目录和目标目录不能为空"));
+        return;
+    }
 
     int startPos = 0;
     int delimiterPos = compressedFilePath_list.Find(_T("\r\n"), 0);
@@ -274,17 +556,13 @@ void CBackupRestoreDlg::OnBnClickedDecompressRestore() {
                 }
             }
         }
-        
-        if (inputFile.eof()) {
-            // 到达文件末尾
-            AfxMessageBox(_T("解压恢复完成"));
-        }
         inputFile.close();
         outputFile.close();
         DeleteHuffmanTree(root);
         startPos = delimiterPos + 2; // 跳过 \r\n
         delimiterPos = compressedFilePath_list.Find(_T("\r\n"), startPos);
     }
+    AfxMessageBox(_T("解压恢复完成"));
 }
 
 // 选择源目录
@@ -622,7 +900,23 @@ CString CBackupRestoreDlg::GetDeCompressedFileNameFromPath(const CString& filePa
     CString tem_name = filePath.Mid(pos + 1);  // 返回文件名部分
     pos = tem_name.ReverseFind(_T('.huff'));
     return tem_name.Left(pos + 1);
-
+}
+CString CBackupRestoreDlg::GetEncryptedFileNameFromPath(const CString& filePath)
+{
+    int pos = filePath.ReverseFind(_T('\\'));
+    if (pos == -1)
+        return filePath;  // 如果没有找到 '\\'，返回整个路径（假设路径是文件名）
+    CString tem_name = filePath.Mid(pos + 1);  // 返回文件名部分
+    return tem_name + _T(".aes");
+}
+CString CBackupRestoreDlg::GetDecryptedFileNameFromPath(const CString& filePath)
+{
+    int pos = filePath.ReverseFind(_T('\\'));
+    if (pos == -1)
+        return filePath;  // 如果没有找到 '\\'，返回整个路径（假设路径是文件名）
+    CString tem_name = filePath.Mid(pos + 1);  // 返回文件名部分
+    pos = tem_name.ReverseFind(_T('.aes '));
+    return tem_name.Left(pos + 1);
 }
 
 int CBackupRestoreDlg::RestoreFiles(const CString& backupPath_list, const CString& restoreDir)

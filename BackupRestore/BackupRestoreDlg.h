@@ -26,10 +26,18 @@ protected:
     void OnBnClickedDecompressRestore();
     CString GetCompressedFileNameFromPath(const CString& filePath);
     CString GetDeCompressedFileNameFromPath(const CString& filePath);
+    void CBackupRestoreDlg::OnBnClickedEncryptBackup();
+    void CBackupRestoreDlg::OnBnClickedDecryptRestore();
+    CString GetEncryptedFileNameFromPath(const CString& filePath);
+    CString GetDecryptedFileNameFromPath(const CString& filePath);
+    void CBackupRestoreDlg::OnEditSetFocus();
+    void CBackupRestoreDlg::OnEditKillFocus();
+    HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 
     // 控件变量
     CEdit m_sourceDirEdit;
     CEdit m_destDirEdit;
+    CEdit m_passwordEdit;
     CButton m_backupBtn;
     CButton m_restoreBtn;
     CButton m_compressbackupBtn;
