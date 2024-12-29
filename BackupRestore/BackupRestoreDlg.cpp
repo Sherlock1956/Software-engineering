@@ -17,6 +17,9 @@
 #include <string>
 #include <openssl/aes.h>
 #include <openssl/rand.h>
+#include <afx.h>
+#include <sstream>
+#include <filesystem>
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
@@ -53,6 +56,7 @@ BEGIN_MESSAGE_MAP(CBackupRestoreDlg, CDialogEx)
     ON_EN_SETFOCUS(IDC_EDIT_PASSWORD, &CBackupRestoreDlg::OnEditSetFocus)
     ON_EN_KILLFOCUS(IDC_EDIT_PASSWORD, &CBackupRestoreDlg::OnEditKillFocus)
     ON_BN_CLICKED(IDC_BUTTON_CLEAR_SOURCE, &CBackupRestoreDlg::OnBnClickedClearSource)
+    ON_BN_CLICKED(IDC_BUTTON_PACK_BACKUP, &CBackupRestoreDlg::OnBnClickedPackFiles)
     ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
 
@@ -101,6 +105,171 @@ void CBackupRestoreDlg::OnEditKillFocus()
         m_passwordEdit.SetWindowText(_T("请在此输入加密密码"));
     }
 }
+
+std::streamsize GetFileSize(const std::string& filePath) {
+    std::ifstream file(filePath, std::ios::binary | std::ios::ate);
+    return file.tellg();
+}
+
+// 填充块
+void WritePaddingBlock(std::ofstream& tarFile) {
+    std::vector<char> endBlock(512, '\0');
+    tarFile.write(endBlock.data(), 512); // 第一个空块
+    tarFile.write(endBlock.data(), 512); // 第二个空块
+}
+
+int setCheckSum(std::vector<char> p) {
+    int n, u = 0;
+    for (n = 0; n < 512; ++n) {
+        if (n < 148 || n > 155)
+            /* Standard tar checksum adds unsigned bytes. */
+            u += static_cast<unsigned char>(p[n]);
+        else
+            u += 0x20;
+    }
+    return u;
+}
+// 填充tar文件头部信息
+void WriteTarHeader(std::ofstream& tarFile, const std::string& fileName, std::streamsize fileSize) {
+    // 初始化 512 字节的 Header Block
+    std::vector<char> header(512, 0);
+    // std::string local_fileName = fileName.substr(fileName.rfind("\\")+1);
+    // 填写文件名 (100 字节)
+    std::memcpy(header.data(), fileName.c_str(), min(fileName.size(), size_t(100)));
+
+    // 填写文件权限 (8 字节，八进制，默认 0644)
+    std::memcpy(header.data() + 100, "0000777\0", 8);
+
+    // 填写用户 ID (8 字节，八进制，默认 0)
+    std::memcpy(header.data() + 108, "0000000\0", 8);
+
+    // 填写组 ID (8 字节，八进制，默认 0)
+    std::memcpy(header.data() + 116, "0000000\0", 8);
+
+    // 填写文件大小 (12 字节，八进制表示)
+    std::ostringstream sizeStream;
+    sizeStream << std::setw(11) << std::setfill('0') << std::oct << fileSize;
+    std::string sizeStr = sizeStream.str();
+    std::memcpy(header.data() + 124, sizeStr.c_str(), sizeStr.size());
+    header[124 + sizeStr.size()] = '\0';
+
+    // 填写修改时间 (12 字节，八进制，默认 0)
+    std::memcpy(header.data() + 136, "00000000000\0", 12);
+
+    // 填写文件类型标志 (typeflag)
+    header[156] = '0';
+
+    // 填写 magic 和 version
+    std::memcpy(header.data() + 257, "ustar ", 6);
+    std::memcpy(header.data() + 263, "  ", 2);
+
+    // 填充校验和字段
+    std::fill(header.begin() + 148, header.begin() + 156, ' '); // 先填充空格
+    unsigned int checksum = 0;
+    for (const char& byte : header) {
+        checksum += static_cast<unsigned char>(byte);
+    }
+    checksum = setCheckSum(header);
+    std::ostringstream chksumStream;
+    chksumStream << std::setw(6) << std::setfill('0') << std::oct << checksum;
+    std::string chksumStr = chksumStream.str();
+    chksumStr.append(2, '\0');  // 确保最后两个字节是 '\0 '
+    std::memcpy(header.data() + 148, chksumStr.c_str(), 8);
+
+    // 写入 TAR 文件头
+    tarFile.write(header.data(), header.size());
+}
+
+// 将单个文件写入tar文件
+void AddFileToTar(std::ofstream& tarFile, const std::string& filePath) {
+    // 打开输入文件
+    std::ifstream inputFile(filePath, std::ios::binary);
+    if (!inputFile.is_open()) {
+        std::cerr << "无法打开文件: " << filePath << std::endl;
+        return;
+    }
+
+    // 获取文件大小
+    std::streamsize fileSize = GetFileSize(filePath);
+
+
+    // 写入 TAR 文件头
+    std::string local_fileName = filePath.substr(filePath.rfind("\\") + 1);
+    WriteTarHeader(tarFile, local_fileName, fileSize);
+
+    // 写入文件数据
+    std::vector<char> buffer(512);
+    while (inputFile.read(buffer.data(), buffer.size())) {
+        tarFile.write(buffer.data(), buffer.size());
+    }
+    tarFile.write(buffer.data(), inputFile.gcount()); // 写入最后一块
+
+    // 填充到 512 字节的倍数
+    size_t paddingSize = 512 - (fileSize % 512);
+    if (paddingSize < 512) {
+        std::vector<char> padding(paddingSize, '\0');
+        tarFile.write(padding.data(), padding.size());
+    }
+}
+
+// 遍历目录并将文件添加到 tar 文件中
+void AddDirectoryToTar(std::ofstream& tarFile, const std::string& dirPath) {
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(dirPath)) {
+        if (entry.is_regular_file()) {
+            AddFileToTar(tarFile, entry.path().string());
+        }
+    }
+}
+
+// 主函数，打包文件或文件夹
+void CreateTarArchive(const std::string& outputTarFile, const std::vector<std::string>& filePaths) {
+    std::ofstream tarFile(outputTarFile, std::ios::binary);
+    if (!tarFile.is_open()) {
+        AfxMessageBox(_T("无法创建 TAR 文件"));
+        return;
+    }
+
+    for (const auto& path : filePaths) {
+        if (std::filesystem::is_directory(path)) {
+            AddDirectoryToTar(tarFile, path); // 如果是文件夹，递归处理文件夹
+        }
+        else if (std::filesystem::is_regular_file(path)) {
+            AddFileToTar(tarFile, path); // 如果是文件，直接添加
+        }
+        else {
+            std::cerr << "不支持的路径类型: " << path << std::endl;
+        }
+    }
+    WritePaddingBlock(tarFile);
+
+    tarFile.close();
+    AfxMessageBox(_T("文件打包完成"));
+}
+void CBackupRestoreDlg::OnBnClickedPackFiles() {
+    CString sourceDir, outputDir;
+    m_sourceDirEdit.GetWindowText(sourceDir);
+    m_destDirEdit.GetWindowText(outputDir);
+    CString outputTarFile = outputDir + _T("\\") + _T("1.tar");
+    if (sourceDir.IsEmpty() || outputTarFile.IsEmpty()) {
+        AfxMessageBox(_T("源目录和目标文件路径不能为空"));
+        return;
+    }
+    CString sourcePath;
+    int startPos = 0;
+    int delimiterPos = sourceDir.Find(_T("\r\n"), 0);
+    std::vector<std::string> filePaths;
+    while (delimiterPos != -1)
+    {
+        sourcePath = sourceDir.Mid(startPos, delimiterPos - startPos);
+        filePaths.push_back(std::string(CT2A(sourcePath)));
+        startPos = delimiterPos + 2; // 跳过 \r\n
+        delimiterPos = sourceDir.Find(_T("\r\n"), startPos);
+    }
+    CreateTarArchive(std::string(CT2A(outputTarFile)), filePaths);
+}
+
+
+
 
 // 从用户密码和盐值派生key和iv
 void DeriveKeyAndIv(const std::string& password, const unsigned char* salt, unsigned char* key, unsigned char* iv) {
@@ -417,11 +586,11 @@ void GenerateHuffmanCodes(HuffmanNode* root, const std::string& code,std::unorde
 }
 
 void CBackupRestoreDlg::OnBnClickedCompressBackup() {
-    CString sourceDir, destDir;
+    CString sourceDir;
     CString inputFilePath, outputFilePath;
     m_sourceDirEdit.GetWindowText(sourceDir);
     m_destDirEdit.GetWindowText(outputFilePath);
-    if (sourceDir.IsEmpty() || destDir.IsEmpty())
+    if (sourceDir.IsEmpty() || outputFilePath.IsEmpty())
     {
         AfxMessageBox(_T("源目录和目标目录不能为空"));
         return;
