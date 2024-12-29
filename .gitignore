@@ -6,3 +6,4 @@ Software-Engineering/BackupRestore/.vs/
 *.jpg
 *.png
 *.bak
+.DS_Store
