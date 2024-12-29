@@ -33,6 +33,7 @@ protected:
     void CBackupRestoreDlg::OnEditSetFocus();
     void CBackupRestoreDlg::OnEditKillFocus();
     HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
+    void OnBnClickedClearSource();
 
     // 控件变量
     CEdit m_sourceDirEdit;

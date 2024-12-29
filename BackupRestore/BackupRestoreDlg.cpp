@@ -33,17 +33,6 @@ void CBackupRestoreDlg::DoDataExchange(CDataExchange* pDX)
     CDialogEx::DoDataExchange(pDX);
     DDX_Control(pDX, IDC_EDIT_SOURCE, m_sourceDirEdit);
     DDX_Control(pDX, IDC_EDIT_DEST, m_destDirEdit);
-    DDX_Control(pDX, IDC_BUTTON_BACKUP, m_backupBtn);
-    DDX_Control(pDX, IDC_BUTTON_COMPRESS_BACKUP, m_compressbackupBtn);
-    DDX_Control(pDX, IDC_BUTTON_PACK_BACKUP, m_packbackupBtn);
-    DDX_Control(pDX, IDC_BUTTON_ENCODE_BACKUP, m_encodebackupBtn);
-    DDX_Control(pDX, IDC_BUTTON_RESTORE, m_restoreBtn);
-    DDX_Control(pDX, IDC_BUTTON_DECOMPRESS_RESTORE, m_decompressrestoreBtn);
-    DDX_Control(pDX, IDC_BUTTON_UNPACK_RESTORE, m_unpackrestoreBtn);
-    DDX_Control(pDX, IDC_BUTTON_DECODE_RESTORE, m_decoderestoreBtn);
-    DDX_Control(pDX, IDC_BUTTON_SELECT_SOURCE, m_selectSourceBtn); // 源目录按钮
-    DDX_Control(pDX, IDC_BUTTON_SELECT_DEST, m_selectDestBtn);     // 目标目录按钮
-    DDX_Control(pDX, IDC_BUTTON_SELECT_SOURCE_DIR, m_selectSourceDirBtn);     // 目标目录按钮
     DDX_Control(pDX, IDC_EDIT_PASSWORD, m_passwordEdit);
 
 }
@@ -63,6 +52,7 @@ BEGIN_MESSAGE_MAP(CBackupRestoreDlg, CDialogEx)
     ON_BN_CLICKED(IDC_BUTTON_DECODE_RESTORE, &CBackupRestoreDlg::OnBnClickedDecryptRestore)
     ON_EN_SETFOCUS(IDC_EDIT_PASSWORD, &CBackupRestoreDlg::OnEditSetFocus)
     ON_EN_KILLFOCUS(IDC_EDIT_PASSWORD, &CBackupRestoreDlg::OnEditKillFocus)
+    ON_BN_CLICKED(IDC_BUTTON_CLEAR_SOURCE, &CBackupRestoreDlg::OnBnClickedClearSource)
     ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()
 
@@ -1003,4 +993,8 @@ void CBackupRestoreDlg::OnBnClickedRestore()
         AfxMessageBox(_T("恢复完成"));
     };
     
+}
+// 清空源文件
+void CBackupRestoreDlg::OnBnClickedClearSource() {
+    m_sourceDirEdit.SetWindowText(_T(""));
 }
