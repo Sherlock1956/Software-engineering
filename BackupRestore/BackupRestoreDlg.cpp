@@ -67,6 +67,7 @@ BOOL CBackupRestoreDlg::OnInitDialog()
 
     return TRUE;  // 除非设置了焦点，否则返回 TRUE
 }
+
 HBRUSH CBackupRestoreDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 {
     HBRUSH hbr = CDialogEx::OnCtlColor(pDC, pWnd, nCtlColor);
@@ -80,6 +81,8 @@ HBRUSH CBackupRestoreDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 
     return hbr;
 }
+
+// 设置提示文本框的焦点状态
 void CBackupRestoreDlg::OnEditSetFocus()
 {
     CString currentText;
@@ -98,10 +101,13 @@ void CBackupRestoreDlg::OnEditKillFocus()
         m_passwordEdit.SetWindowText(_T("请在此输入加密密码"));
     }
 }
+
+// 从用户密码和盐值派生key和iv
 void DeriveKeyAndIv(const std::string& password, const unsigned char* salt, unsigned char* key, unsigned char* iv) {
     EVP_BytesToKey(EVP_aes_128_cbc(), EVP_sha256(), salt,
         reinterpret_cast<const unsigned char*>(password.c_str()), password.length(), 1, key, iv);
 }
+
 void AES_Encrypt(const std::vector<unsigned char>& input, std::vector<unsigned char>& output,
     const unsigned char* key, const unsigned char* iv) {
     // 创建和初始化上下文
@@ -147,7 +153,6 @@ void AES_Encrypt(const std::vector<unsigned char>& input, std::vector<unsigned c
     EVP_CIPHER_CTX_free(ctx);
 }
 
-
 void AES_Decrypt(const std::vector<unsigned char>& input, std::vector<unsigned char>& output,
     const unsigned char* key, const unsigned char* iv) {
     // 创建和初始化上下文
@@ -188,6 +193,7 @@ void AES_Decrypt(const std::vector<unsigned char>& input, std::vector<unsigned c
     // 清理上下文
     EVP_CIPHER_CTX_free(ctx);
 }
+
 void CBackupRestoreDlg::OnBnClickedEncryptBackup() {
     CString sourceDir, destDir;
     CString inputFilePath, outputFilePath;
@@ -257,6 +263,7 @@ void CBackupRestoreDlg::OnBnClickedEncryptBackup() {
     }
     AfxMessageBox(_T("加密备份完成"));
 }
+
 void CBackupRestoreDlg::OnBnClickedDecryptRestore() {
     CString sourceDir, destDir;
     CString inputFilePath, outputFilePath;
@@ -336,6 +343,7 @@ struct HuffmanNode {
 
     HuffmanNode(unsigned char d, int f) : data(d), freq(f), left(nullptr), right(nullptr) {}
 };
+
 // 将二进制字符串转换为字节流
 std::vector<unsigned char> PackBitsToBytes(const std::string& binaryString) {
     std::vector<unsigned char> byteStream;
@@ -358,18 +366,22 @@ std::vector<unsigned char> PackBitsToBytes(const std::string& binaryString) {
     }
     return byteStream;
 }
+
 void DeleteHuffmanTree(HuffmanNode* node) {
     if (!node) return;
     DeleteHuffmanTree(node->left);
     DeleteHuffmanTree(node->right);
     delete node;
 }
+
 // 比较器用于优先队列
 struct Compare {
     bool operator()(HuffmanNode* a, HuffmanNode* b) {
         return (a->freq == b->freq) ? (a->data > b->data) : (a->freq > b->freq);
     }
 };
+
+// 生成Huffman树
 HuffmanNode* BuildHuffmanTree(const std::vector<std::pair<unsigned char, int>> freqVector) {
     std::priority_queue<HuffmanNode*, std::vector<HuffmanNode*>, Compare> pq;
 
@@ -390,6 +402,8 @@ HuffmanNode* BuildHuffmanTree(const std::vector<std::pair<unsigned char, int>> f
     }
     return pq.top();  // 根节点
 }
+
+// 根据Huffman树对每个字节生成对应编码
 void GenerateHuffmanCodes(HuffmanNode* root, const std::string& code,std::unordered_map<unsigned char, std::string>& huffmanCodes) {
     if (!root) return;
 
@@ -401,6 +415,7 @@ void GenerateHuffmanCodes(HuffmanNode* root, const std::string& code,std::unorde
     GenerateHuffmanCodes(root->left, code + "0", huffmanCodes);
     GenerateHuffmanCodes(root->right, code + "1", huffmanCodes);
 }
+
 void CBackupRestoreDlg::OnBnClickedCompressBackup() {
     CString sourceDir, destDir;
     CString inputFilePath, outputFilePath;
@@ -470,6 +485,7 @@ void CBackupRestoreDlg::OnBnClickedCompressBackup() {
     }
     AfxMessageBox(_T("压缩备份完成"));
 }
+
 void CBackupRestoreDlg::OnBnClickedDecompressRestore() {
     CString compressedFilePath_list, outputFilePath, compressedFilePath;
     m_sourceDirEdit.GetWindowText(compressedFilePath_list);
@@ -593,16 +609,6 @@ void CBackupRestoreDlg::OnBnClickedSelectSource()
         currentText += _T("\r\n");
         m_sourceDirEdit.SetWindowText(currentText);  // 更新源目录输入框
     }
-}
-
-// 检查文件是否为允许的格式
-bool CBackupRestoreDlg::IsAllowedFileFormat(const CString& fileExt)
-{
-    // 允许的文件格式（根据需求调整）
-    const std::vector<CString> allowedFormats = { _T("txt"), _T("jpg"), _T("png"), _T("doc"), _T("docx") };
-
-    // 检查文件格式是否在允许的列表中
-    return std::find(allowedFormats.begin(), allowedFormats.end(), fileExt) != allowedFormats.end();
 }
 
 void CBackupRestoreDlg::OnBnClickedSelectSourceDir()
@@ -874,6 +880,7 @@ CString CBackupRestoreDlg::GetFileNameFromPath(const CString& filePath)
         return filePath;  // 如果没有找到 '\\'，返回整个路径（假设路径是文件名）
     return filePath.Mid(pos + 1);  // 返回文件名部分
 }
+
 CString CBackupRestoreDlg::GetCompressedFileNameFromPath(const CString& filePath)
 {
     int pos = filePath.ReverseFind(_T('\\'));
@@ -882,6 +889,7 @@ CString CBackupRestoreDlg::GetCompressedFileNameFromPath(const CString& filePath
     CString tem_name = filePath.Mid(pos + 1);  // 返回文件名部分
     return tem_name + _T(".huff");
 }
+
 CString CBackupRestoreDlg::GetDeCompressedFileNameFromPath(const CString& filePath)
 {
     int pos = filePath.ReverseFind(_T('\\'));
@@ -891,6 +899,7 @@ CString CBackupRestoreDlg::GetDeCompressedFileNameFromPath(const CString& filePa
     pos = tem_name.ReverseFind(_T('.huff'));
     return tem_name.Left(pos + 1);
 }
+
 CString CBackupRestoreDlg::GetEncryptedFileNameFromPath(const CString& filePath)
 {
     int pos = filePath.ReverseFind(_T('\\'));
@@ -899,6 +908,7 @@ CString CBackupRestoreDlg::GetEncryptedFileNameFromPath(const CString& filePath)
     CString tem_name = filePath.Mid(pos + 1);  // 返回文件名部分
     return tem_name + _T(".aes");
 }
+
 CString CBackupRestoreDlg::GetDecryptedFileNameFromPath(const CString& filePath)
 {
     int pos = filePath.ReverseFind(_T('\\'));
@@ -994,6 +1004,7 @@ void CBackupRestoreDlg::OnBnClickedRestore()
     };
     
 }
+
 // 清空源文件
 void CBackupRestoreDlg::OnBnClickedClearSource() {
     m_sourceDirEdit.SetWindowText(_T(""));
