@@ -37,6 +37,7 @@ void CBackupRestoreDlg::DoDataExchange(CDataExchange* pDX)
     DDX_Control(pDX, IDC_EDIT_SOURCE, m_sourceDirEdit);
     DDX_Control(pDX, IDC_EDIT_DEST, m_destDirEdit);
     DDX_Control(pDX, IDC_EDIT_PASSWORD, m_passwordEdit);
+    DDX_Control(pDX, IDC_EDIT_PACK_NAME, m_packnameEdit);
 
 }
 
@@ -55,6 +56,8 @@ BEGIN_MESSAGE_MAP(CBackupRestoreDlg, CDialogEx)
     ON_BN_CLICKED(IDC_BUTTON_DECODE_RESTORE, &CBackupRestoreDlg::OnBnClickedDecryptRestore)
     ON_EN_SETFOCUS(IDC_EDIT_PASSWORD, &CBackupRestoreDlg::OnEditSetFocus)
     ON_EN_KILLFOCUS(IDC_EDIT_PASSWORD, &CBackupRestoreDlg::OnEditKillFocus)
+    ON_EN_SETFOCUS(IDC_EDIT_PACK_NAME, &CBackupRestoreDlg::OnEditSetFocus2)
+    ON_EN_KILLFOCUS(IDC_EDIT_PACK_NAME, &CBackupRestoreDlg::OnEditKillFocus2)
     ON_BN_CLICKED(IDC_BUTTON_CLEAR_SOURCE, &CBackupRestoreDlg::OnBnClickedClearSource)
     ON_BN_CLICKED(IDC_BUTTON_PACK_BACKUP, &CBackupRestoreDlg::OnBnClickedPackFiles)
     ON_WM_CTLCOLOR()
@@ -68,6 +71,9 @@ BOOL CBackupRestoreDlg::OnInitDialog()
     m_passwordEdit.SetWindowText(_T("请在此输入加密密码"));
     m_passwordEdit.SetSel(0, -1);  // 选择所有文本
     m_passwordEdit.SetFocus();     // 设置焦点
+    m_packnameEdit.SetWindowTextW(_T("请在此输入打包文件名称"));
+    m_packnameEdit.SetSel(0, -1);
+    m_packnameEdit.SetFocus();
 
     return TRUE;  // 除非设置了焦点，否则返回 TRUE
 }
@@ -82,6 +88,12 @@ HBRUSH CBackupRestoreDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
         pDC->SetTextColor(RGB(169, 169, 169));  // 灰色
         pDC->SetBkMode(TRANSPARENT);            // 背景透明
     }
+    if (pWnd->GetDlgCtrlID() == IDC_EDIT_PACK_NAME)  // 判断是否是指定的编辑框
+    {
+        // 设置灰色字体
+        pDC->SetTextColor(RGB(169, 169, 169));  // 灰色
+        pDC->SetBkMode(TRANSPARENT);            // 背景透明
+    }
 
     return hbr;
 }
@@ -89,20 +101,31 @@ HBRUSH CBackupRestoreDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 // 设置提示文本框的焦点状态
 void CBackupRestoreDlg::OnEditSetFocus()
 {
-    CString currentText;
-    m_passwordEdit.GetWindowText(currentText);
     m_passwordEdit.SetWindowText(_T(""));
+}
+void CBackupRestoreDlg::OnEditSetFocus2()
+{
+    m_packnameEdit.SetWindowText(_T(""));
 }
 
 void CBackupRestoreDlg::OnEditKillFocus()
 {
     CString currentText;
     m_passwordEdit.GetWindowText(currentText);
-
     // 如果文本框为空，则恢复提示文本
     if (currentText.IsEmpty())
     {
         m_passwordEdit.SetWindowText(_T("请在此输入加密密码"));
+    }
+}
+void CBackupRestoreDlg::OnEditKillFocus2()
+{
+    CString currentText;
+    m_packnameEdit.GetWindowText(currentText);
+    // 如果文本框为空，则恢复提示文本
+    if (currentText.IsEmpty())
+    {
+        m_packnameEdit.SetWindowText(_T("请在此输入打包文件名称"));
     }
 }
 
@@ -246,10 +269,15 @@ void CreateTarArchive(const std::string& outputTarFile, const std::vector<std::s
     AfxMessageBox(_T("文件打包完成"));
 }
 void CBackupRestoreDlg::OnBnClickedPackFiles() {
-    CString sourceDir, outputDir;
+    CString sourceDir, outputDir, packName;
     m_sourceDirEdit.GetWindowText(sourceDir);
     m_destDirEdit.GetWindowText(outputDir);
-    CString outputTarFile = outputDir + _T("\\") + _T("1.tar");
+    m_packnameEdit.GetWindowText(packName);
+    if (packName == "请在此输入打包文件名称") {
+        AfxMessageBox(_T("请输入打包文件名称"));
+        return;
+    }
+    CString outputTarFile = outputDir + _T("\\") + packName + _T(".tar");
     if (sourceDir.IsEmpty() || outputTarFile.IsEmpty()) {
         AfxMessageBox(_T("源目录和目标文件路径不能为空"));
         return;

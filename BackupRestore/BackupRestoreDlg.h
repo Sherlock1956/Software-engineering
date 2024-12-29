@@ -21,7 +21,6 @@ protected:
     BOOL HandleSymbolicLink(const CString& sourcePath, const CString& destDir);
     BOOL HandleFile(const CString& sourcePath, const CString& saveDir);
     BOOL HandleDirectory(const CString& sourcePath, CString& saveDir);
-    bool IsAllowedFileFormat(const CString& fileExt);
     void OnBnClickedCompressBackup();
     void OnBnClickedDecompressRestore();
     CString GetCompressedFileNameFromPath(const CString& filePath);
@@ -32,6 +31,8 @@ protected:
     CString GetDecryptedFileNameFromPath(const CString& filePath);
     void CBackupRestoreDlg::OnEditSetFocus();
     void CBackupRestoreDlg::OnEditKillFocus();
+    void CBackupRestoreDlg::OnEditSetFocus2();
+    void CBackupRestoreDlg::OnEditKillFocus2();
     HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
     void OnBnClickedClearSource();
     void OnBnClickedPackFiles();
@@ -40,6 +41,7 @@ protected:
     CEdit m_sourceDirEdit;
     CEdit m_destDirEdit;
     CEdit m_passwordEdit;
+    CEdit m_packnameEdit;
     CButton m_backupBtn;
     CButton m_restoreBtn;
     CButton m_compressbackupBtn;
